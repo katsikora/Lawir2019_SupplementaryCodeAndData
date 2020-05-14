@@ -1,0 +1,709 @@
+---
+title: "Supplementary Code: Pervasive changes of mRNA splicing in upf1 deficient zebrafish identify rpl10a as a regulator of T cell development"
+author: "Divine-Fondzenyuy Lawir, Katarzyna Sikora, Connor O´Meara, Michael Schorpp, and Thomas Boehm"
+date: "8/30/2019"
+output: 
+  html_document:
+    fig_caption: yes
+    toc: true
+    toc_float: true
+    toc_depth: 4
+fontsize: 14pt
+geometry: margin=0.6in   
+
+header-includes:   
+  \usepackage{color}
+---
+
+
+```{r setup, include=FALSE}
+#Rlib<-"/home/sikora/R/R_mv/x86_64-redhat-linux-gnu-library/3.3"
+start_time <- Sys.time()
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)#,lib.loc=Rlib
+opts_chunk$set(tidy.opts=list(width.cutoff=75),tidy=TRUE)
+opts_chunk$set(width=75)
+```
+
+```{r private_path,include=FALSE}
+#.libPaths(Rlib)
+```
+
+## **Summary**
+
+This document provides the R code and accompanying explanations to reproduce Figures 2A-D, 3B-C,F, 4A-D, 5C from the manuscript with working title "Pervasive changes of mRNA splicing in upf1 deficient zebrafish identify rpl10a as a regulator of T cell development"" by Lawir et al..
+The analysis starts with sleuth (differential transcript expression) and salmon (transcript quantitation), as well as rMATS (differential splicing) output tables and walks the reader through the computational procedures underlying the manuscript figures.  A copy of this document will be deposited on GitHub under https://github.com/katsikora/Lawir2019_SupplementaryCodeAndData upon publication. The code is formatted in a way to facilitate understanding and interpretation by a lay R user.
+This code is authored by Katarzyna Sikora.
+
+<h4 style="color:blue">Input data</h4>   
+<hr color="blue" >
+
+Input data (TPM transcript counts and differential transcript expression results, as well as differential splicing analysis results) can be obtained under:  
+
+* https://owncloud.gwdg.de/index.php/s/lE5jNBwMZvZq8ZU/download (upf1 transcript expression table with TPM from salmon, RData format) 
+* https://owncloud.gwdg.de/index.php/s/tEawWxhokEvnYXB/download (upf1 differential transcript expression results from sleuth, txt format)
+* https://owncloud.gwdg.de/index.php/s/EaqmwLATYmOiMhw/download (tnpo3 transcript expression table with TPM from salmon, RData format)
+* https://owncloud.gwdg.de/index.php/s/bnbFKnUJzSrN1SA/download (tnpo3 differential transcript expression results from sleuth, txt format)
+* https://owncloud.gwdg.de/index.php/s/4MXxMNkLIim6zqV/download (upf1 summary of differential transcript results from rMATS, txt format)
+* https://owncloud.gwdg.de/index.php/s/GYs9TZ0NojfkC8n/download (upf1 alternative 3' splice site events from rMATS, txt format)
+* https://owncloud.gwdg.de/index.php/s/PG6gMPMxR8kj4Tc/download (upf1 alternative 5' splice site events from rMATS, txt format)
+* https://owncloud.gwdg.de/index.php/s/aI1rMW7mluqmGCW/download (upf1 mutually exclusive exon events from rMATS, txt format)
+* https://owncloud.gwdg.de/index.php/s/TTtonDyto0wysRr/download (upf1 intron retention events from rMATS, txt format)
+* https://owncloud.gwdg.de/index.php/s/ToesC9NBDAGKmkE/download (upf1 exon skipping events from rMATS, txt format)
+* https://owncloud.gwdg.de/index.php/s/fDsyi2bm2hyCwqm/download (tnpo3 summary of differential transcript results from rMATS, txt format)
+* https://owncloud.gwdg.de/index.php/s/iuKZhNHtnA6xRqi/download (tnpo3 alternative 3' splice site events from rMATS, txt format)
+* https://owncloud.gwdg.de/index.php/s/ZZ1uwNHxQ7Aiydy/download (tnpo3 alternative 5' splice site events from rMATS, txt format)
+* https://owncloud.gwdg.de/index.php/s/8qOyBxHs4Sldj3W/download (tnpo3 mutually exclusive exon events from rMATS, txt format)
+* https://owncloud.gwdg.de/index.php/s/KDc9m65IRwEUlKd/download (tnpo3 intron retention events from rMATS, txt format)
+* https://owncloud.gwdg.de/index.php/s/BipXuUaEOfsq3tp/download (tnpo3 exon skipping events from rMATS, txt format)
+
+Transcripts are identified by ensembl transcript id, release 83.
+
+<h4 style="color:blue">Load required packages</h4>   
+<hr color="blue" >
+
+
+```{r libs, echo=TRUE}
+library(data.table,quietly=TRUE)
+library(dplyr,quietly=TRUE)
+library(reshape2,quietly=TRUE)
+library(ggplot2,quietly=TRUE)
+library(magrittr,quietly=TRUE)
+library(limma,quietly=TRUE)
+library(car,quietly=TRUE)
+library(curl,quietly=TRUE)
+library(biomaRt,quietly=TRUE)
+library(gridExtra,quietly=TRUE)
+library(cowplot,quietly=TRUE)
+library(VennDiagram,quietly=TRUE)
+```
+
+<h4 style="color:blue">Figures 2A-D: Transcript level quantitation in upf1 mutant and wildtype fish with biotype annotation</h4>   
+<hr color="blue" >
+
+Load salmon output data with transcript-level TPM counts for upf1 mutant and wildtype fish:
+
+```{r download1, echo=TRUE}
+con <- curl('https://owncloud.gwdg.de/index.php/s/lE5jNBwMZvZq8ZU/download',open='rb')
+load(con)
+close(con)
+
+dim(qdat)
+sum(complete.cases(qdat))
+## qdat is in a data.table format - make sure the data.table package is loaded!
+qdat
+```
+
+Load sleuth output data with results of differential transcript expression for upf1 mutant and wildtype fish:
+
+```{r download2, echo=TRUE}
+con <- curl('https://owncloud.gwdg.de/index.php/s/tEawWxhokEvnYXB/download',open='r')
+results_table<-read.table(con,sep="\t",header=TRUE,quote="",as.is=TRUE)
+close(con)
+
+dim(results_table)
+sum(complete.cases(results_table))
+results_table<-results_table[complete.cases(results_table),]
+dim(results_table)
+head(results_table)
+```
+
+Annotate the 'results_table' with mean TPM values per group using 'qdat' and calculate log2 fold changes:
+
+```{r annot_res_upf1, echo=TRUE}
+meandat<-summarize(group_by(qdat,Name,Group),MeanTPM=mean(TPM))
+meandatW<-dcast(Name~Group,value.var="MeanTPM",data=meandat)
+
+results_table$MeanTPM.WT<-meandatW$WT[match(results_table$target_id,meandatW$Name)]
+results_table$MeanTPM.Mut<-meandatW$Mut[match(results_table$target_id,meandatW$Name)]
+results_table$Log2FC<-with(results_table,log2(MeanTPM.Mut/MeanTPM.WT))
+sum(is.infinite(results_table$Log2FC))
+```
+
+We have calculated log2 fold changes on mean TPM values without adding a pseudocount, using only transcripts for which sleuth produced differential expression estimates. This conservative approach doesn't introduce additional noise when calculating log2 fold changes for lowly expressed genes. As a result, `r sum(is.infinite(results_table$Log2FC))` values are infinite, and we will ignore those for further analysis.
+
+Filter results table to retain transcripts with statistical support for differential expression passing the filtering criteria of absolute log2 fold change at least 1, and qvalue less than 0.05:
+
+```{r res_annot_upf1, echo=TRUE}
+results_table.filt<-results_table[results_table$qval<0.05&abs(results_table$Log2FC)>=1,]
+results_table.filt<-results_table.filt[complete.cases(results_table.filt),]
+dim(results_table.filt)
+```
+
+This manuscript focuses on the contrast in regulation of NMD and non-NMD transcripts, as defined in ensembl gene annotation http://vega.archive.ensembl.org/info/about/gene_and_transcript_types.html .   
+Results reported in the manuscript were annotated using ensembl release 88.
+Annotate filtered results with transcript biotype using the biomaRt package:
+
+```{r res_biomart_upf1, echo=TRUE}
+zv10.ens<-useMart(biomart="ensembl",dataset="drerio_gene_ensembl",host="http://mar2017.archive.ensembl.org")
+bmk<-getBM(attributes=c("ensembl_transcript_id","transcript_biotype","ensembl_gene_id","external_gene_name"),filter="ensembl_transcript_id",values=results_table.filt$target_id,mart=zv10.ens)
+res.tab.filt.an<-merge(x=results_table.filt,y=bmk,by.x="target_id",by.y="ensembl_transcript_id",all.x=TRUE)
+head(res.tab.filt.an)
+```
+
+Annotate 'qdat' TPM expression table with transcript biotype information from ensembl:
+
+```{r qdat_biomart_upf1, echo=TRUE}
+bmk2<-getBM(attributes=c("ensembl_transcript_id","transcript_biotype","ensembl_gene_id","external_gene_name"),filter="ensembl_transcript_id",values=qdat$Name,mart=zv10.ens)
+qdat.an<-unique(merge(x=qdat,y=bmk2,by.x="Name",by.y="ensembl_transcript_id",all.x=TRUE,allow.cartesian=TRUE))
+
+qdat.an$Biotype2<-"nonNMD"
+qdat.an$Biotype2[qdat.an$transcript_biotype %in% "nonsense_mediated_decay"]<-"NMD"
+head(qdat.an)
+```
+
+We collapse all transcript isoforms not annotated as "nonsense_mediated_decay" to one category "nonNMD".
+
+Calculate mean transript expression over replicates in each group and add binarized transcript biotype information:
+
+```{r TPMmean_upf1, echo=TRUE}
+TPMmean<-as.data.frame(summarize(group_by(qdat.an,Group,Name),MeanTPM=mean(TPM)),stringsAsFactors=FALSE)
+TPMmean$Biotype<-qdat.an$Biotype2[match(TPMmean$Name,qdat.an$Name)]
+head(TPMmean)
+```
+Reshape table to obtain separate columns for the WT and for the Mut group. Add information on passing statistical filters:
+
+```{r TPMmean2_upf1, echo=TRUE}
+TPMmean2<-dcast(Name+Biotype~Group,data=TPMmean,value.var="MeanTPM")
+TPMmean2$Filter<-"Fail"
+TPMmean2$Filter[TPMmean2$Name %in% results_table.filt$target_id]<-"Pass"
+head(TPMmean2)
+```
+```{r TPMplot_upf1, fig.cap="Figure 2A",fig.height=5,fig.width=6}
+TPMmean2$Biotype<-factor(TPMmean2$Biotype,levels=c("nonNMD","NMD"))
+TPMmean2$Filter<-factor(TPMmean2$Filter,levels=c("Fail","Pass"))
+ggplot(TPMmean2 %>% arrange(Filter))+geom_point(aes(x=WT,y=Mut,colour=Filter,shape=Biotype),size=3,alpha=0.6)+geom_abline(aes(intercept=0,slope=1))+theme(axis.text=element_text(size=14),axis.title=element_text(size=16),strip.text=element_text(size=12))+scale_colour_manual(values=c("grey40","orangered3"))+xlab("upf1+/+")+ylab("upf1-/-")
+```
+
+Tabulate number of up- and down-regulated transcripts passing the filters in "NMD" and "nonNMD" categories:
+
+```{r sleuth_tab_upf1, echo=TRUE}
+res.tab.filt.an$ChangeDirection<-"UP"
+res.tab.filt.an$ChangeDirection[res.tab.filt.an$Log2FC<0]<-"DOWN"
+res.tab.filt.an$Biotype2<-"nonNMD"
+res.tab.filt.an$Biotype2[res.tab.filt.an$transcript_biotype %in% "nonsense_mediated_decay"]<-"NMD"
+table(res.tab.filt.an$Biotype2,res.tab.filt.an$ChangeDirection)
+```
+
+Replot Figure 2A setting axis limits to 2000 TPM and labelling a few genes of interest:
+
+```{r TPM2000_upf1,echo=TRUE, fig.cap="Figure 2B",fig.height=5,fig.width=6}
+auxtab<-TPMmean2[TPMmean2$Biotype %in% "NMD"&TPMmean2$WT<200&TPMmean2$Mut>450,]
+auxtab$Symbol<-bmk$external_gene_name[match(auxtab$Name,bmk$ensembl_transcript_id)]
+auxtab<-auxtab[!auxtab$Symbol %in% "si:ch211-196l7.4",]
+ggplot(TPMmean2 %>% arrange(Filter))+geom_point(aes(x=WT,y=Mut,colour=Filter,shape=Biotype),size=3,alpha=0.6)+geom_abline(aes(intercept=0,slope=1))+geom_text(data=auxtab,aes(x=WT,y=Mut,label=Symbol),hjust = 0, nudge_x = 20,nudge_y=20,angle =45)+theme(axis.text=element_text(size=14),axis.title=element_text(size=16),strip.text=element_text(size=12))+xlim(0,2000)+ylim(0,2000)+scale_colour_manual(values=c("grey40","orangered3"))
+```
+
+
+Aggregate TPM counts per gene as sum over transcript counts, separately for "NMD" and for "nonNMD" transcript classes:
+
+```{r qdat_sum_upf1, echo=TRUE}
+qdat.sum<-summarize(group_by(qdat.an,ensembl_gene_id,SampleID,Biotype2),sumTPM=sum(TPM))
+qdat.sumW<-dcast(ensembl_gene_id+SampleID~Biotype2,value.var="sumTPM",data=qdat.sum)
+qdat.sumW<-qdat.sumW[complete.cases(qdat.sumW),]
+dim(qdat.sumW)
+head(qdat.sumW)
+```
+
+Calculate mean fraction of "NMD" transcript expression against sum of "NMD" and "nonNMD" transcript expression per gene ("NMD ratio"):
+
+```{r NMDratio_upf1, echo=TRUE}
+qdat.sumW$Ratio<-with(qdat.sumW,NMD/(NMD+nonNMD))
+qdat.sumW$Group<-gsub("[0-9]","",gsub("HJ.+_","",qdat.sumW$SampleID))
+upf1_qdat.sumW<-qdat.sumW
+qdat.sum2<-summarize(group_by(qdat.sumW,ensembl_gene_id,Group),MeanRatio=mean(Ratio))
+qdat.sum2W<-dcast(ensembl_gene_id~Group,value.var="MeanRatio",data=qdat.sum2)
+dim(qdat.sum2W)
+head(qdat.sum2W)
+```
+
+Apply limma to logit-transformed NMD ratios to obtain a list of statistically different ratios between mutant and wildtype fish, and filter results for FDR<0.05:
+
+```{r limma_ratio_upf1, echo=TRUE}
+qdat.sumW$LogitRatio<-logit(qdat.sumW$Ratio,percents=FALSE,adjust=0.025)
+
+limdat<-dcast(ensembl_gene_id~SampleID,value.var="LogitRatio",data=qdat.sumW)
+rownames(limdat)<-limdat$ensembl_gene_id
+limdat<-limdat[,!colnames(limdat) %in% "ensembl_gene_id"]
+
+sampleInfo<-unique(qdat.sumW[,c("SampleID","Group")])
+rownames(sampleInfo)<-sampleInfo$SampleID
+sampleInfo<-sampleInfo[match(colnames(limdat),sampleInfo$SampleID),]
+
+#limma
+design<-as.data.frame(matrix(ncol=2,nrow=(ncol(limdat))),stringsAsFactors=FALSE)
+colnames(design)<-c("Intercept","Group")
+rownames(design)<-colnames(limdat)
+design$Group<-as.numeric(factor(sampleInfo$Group[match(colnames(limdat),sampleInfo$SampleID)],levels=c("WT","Mut")))
+
+design$Intercept<-1
+design<-as.matrix(design)
+
+fit<-lmFit(limdat,design)
+fit.eB<-eBayes(fit)
+tT.FDR5<-topTable(fit.eB,2,p.value=0.05,number=Inf)[,c("logFC","t","adj.P.Val","B")]
+dim(tT.FDR5)
+head(tT.FDR5)
+```
+
+Add information on passing or failing filters on statistical metrics:
+
+```{r signif_upf1, echo=TRUE}
+qdat.sum2W$Filter<-"FAIL"
+qdat.sum2W$Filter[qdat.sum2W$ensembl_gene_id %in% rownames(tT.FDR5)]<-"PASS"
+table(qdat.sum2W$Filter)
+
+```
+
+
+Plot NMD ratios per gene aggregated over wild type and mutant groups:
+
+```{r NMDratio_plot_upf1, echo=TRUE, fig.cap="Figure 2C",fig.height=5,fig.width=5}
+auxtab<-qdat.sum2W[qdat.sum2W$ensembl_gene_id %in% bmk$ensembl_gene_id[bmk$external_gene_name %in% c("rpl22l1","rpl10a","srsf5a","srsf3a")],]
+auxtab$Symbol<-bmk$external_gene_name[match(auxtab$ensembl_gene_id,bmk$ensembl_gene_id)]
+ggplot(qdat.sum2W %>% arrange(Filter))+geom_point(aes(x=WT,y=Mut,colour=Filter),size=2,alpha=0.6)+geom_abline(aes(intercept=0,slope=1))+scale_colour_manual(values=c("grey40","orangered3"))+geom_text(data=auxtab,aes(x=WT,y=Mut,label=Symbol),hjust = 0, nudge_x = 0.01,nudge_y=0.01,angle =45)+theme(axis.text=element_text(size=14),axis.title=element_text(size=16),strip.text=element_text(size=12))+ggtitle("NMD ratio")+xlab("upf1+/+")+ylab("upf1-/-")
+```
+
+
+```{r violin_upf1, echo=TRUE, fig.cap="Figure 2D",fig.height=5,fig.width=5}
+qdat.sum2$Group[qdat.sum2$Group %in% "WT"]<-"upf1+/+"
+qdat.sum2$Group[qdat.sum2$Group %in% "Mut"]<-"upf1-/-"
+qdat.sum2$Group<-factor(qdat.sum2$Group,levels=c("upf1+/+","upf1-/-"))
+ggplot(data=qdat.sum2)+geom_violin(aes(x=Group,y=MeanRatio,fill=Group))+geom_boxplot(aes(x=Group,y=MeanRatio),width=0.1)+ggtitle("NMD ratio")+theme(axis.text=element_text(size=14),axis.title=element_text(size=16))
+```
+
+<h4 style="color:blue">Figure 3B: Differential splicing event detection in upf1 mutant and wildtype fish</h4>   
+<hr color="blue" >
+
+
+Download event tables, one for each alternative event class (SE, RI, MXE, A5SS, A3SS), and filter for FDR<0.01 and absolute inclusion level difference of 0.05:
+
+```{r download3, echo=TRUE}
+asv<-c("A3SS","A5SS","MXE","RI","SE")
+resL<-vector("list",length(asv))
+names(resL)<-asv
+conL<-list("https://owncloud.gwdg.de/index.php/s/GYs9TZ0NojfkC8n/download","https://owncloud.gwdg.de/index.php/s/PG6gMPMxR8kj4Tc/download","https://owncloud.gwdg.de/index.php/s/aI1rMW7mluqmGCW/download","https://owncloud.gwdg.de/index.php/s/TTtonDyto0wysRr/download","https://owncloud.gwdg.de/index.php/s/ToesC9NBDAGKmkE/download")
+names(conL)<-asv
+
+for(i in seq_along(asv)){
+con <- curl(conL[[i]],open='r')
+tabi<-read.table(con,sep="\t",header=TRUE,quote="",as.is=TRUE)
+close(con)
+tabi$GeneID<-with(tabi,gsub("\"","",GeneID))
+tabi$geneSymbol<-with(tabi,gsub("\"","",geneSymbol))
+tabi_f<-tabi[tabi$FDR<0.01&abs(tabi$IncLevelDifference)>=0.05,]
+resL[[i]]<-tabi_f
+}
+unlist(lapply(resL,function(X)nrow(X)))
+unlist(lapply(resL,function(X)length(unique(X$GeneID))))
+upf1_resL<-resL
+```
+
+Download the summary table for rMATS events :
+
+```{r download4, echo=TRUE}
+con<-curl("https://owncloud.gwdg.de/index.php/s/4MXxMNkLIim6zqV/download",open='r')
+sumtab<-read.table(con,sep="\t",header=TRUE,quote="",as.is=TRUE)
+close(con)
+sumtab
+```
+
+Update information using event counts from tables filtered according to chosen criteria and format for plotting:
+
+```{r sumtab_filt_upf1,echo=TRUE}
+asvo<-c("SE","RI","MXE","A5SS","A3SS")
+sumtab<-sumtab[match(c(asvo),sumtab$EventType),]
+sumtab$LYlab<-c("Skipped Exon","Retained Intron","Mutually Exclusive Exons","Alternative Donor Site","Alternative Acceptor Site")
+sumtab$RYlab<-sumtab$NumEvents.JC.only
+sumtab$WT<-NA
+sumtab$MT<-NA
+for(k in seq_along(asvo)){
+tab.filt<-resL[[asvo[k]]]
+#at first, keep the same direction as in the original rMATS ouput
+sumtab$WT[sumtab$EventType==asvo[k]]<-nrow(tab.filt[tab.filt$IncLevelDifference<0,])
+sumtab$MT[sumtab$EventType==asvo[k]]<-nrow(tab.filt[tab.filt$IncLevelDifference>0,])
+}
+#DO reverse the numbers for SE (to actually reflect number of skipping events, rather than retention)
+sumtab[sumtab$EventType=="SE",c("WT","MT")]<-rev(sumtab[sumtab$EventType=="SE",c("WT","MT")])
+sumtab
+
+sumtabL<-melt(sumtab[,6:9],variable.name="Group",value.name="num.sig.events",id.var=c("LYlab","RYlab"))
+colnames(sumtabL)[1:2]<-c("Category","num.tot.events")
+sumtabL$num.sig.events<-as.numeric(sumtabL$num.sig.events)
+sumtabL$num.tot.events<-as.character(sumtabL$num.tot.events)
+sumtabL$num.tot.events<-factor(sumtabL$num.tot.events,levels=rev(as.character(sumtabL$num.tot.events[1:5])))
+Glab<-c("WT"="upf1+/+","MT"="upf1-/-")
+sumtabL$Group.graph<-Glab[sumtabL$Group]
+sumtabL
+```
+
+rMATS reports a skipped exon as an event in the sample group, in which the inclusion ratio for that exon is higher, such that it is effectively an exon retention event. In order to be able to interpret the reported events as proper exon skipping, we have reverted the number of reported exon retention events between the experimental groups in the code chunk above. As a result, exons with lower inclusion levels in the mutant group are now reported as skipped exons in that group, and exons with lower inclusion levels in the wildtype groups are reported as skipped in that group.
+
+Generate the final plot by combining two plot grobs:
+
+```{r rMATS_plot_upf1, echo=TRUE, fig.cap="Figure 3B",fig.height=10,fig.width=10}
+g.left<-ggplot(data=sumtabL,aes(y=num.sig.events,x=Category,fill=factor(Group.graph)))+geom_bar(stat="identity",position="dodge")+theme_bw()+theme(axis.title.y=element_blank(),plot.margin=unit(c(0.5,0.4,0.5,0.5),units="cm"),plot.title=element_text(colour="transparent"))+coord_flip()+scale_fill_manual(values=c("dark red","black"))+scale_y_continuous(name="Number of alternative splicing events")+ guides(fill=guide_legend(title=NULL))+ theme(legend.justification=c(1,0), legend.position=c(1,0))+ggtitle("Number of\ntested events")
+
+g.right<-ggplot(data=sumtabL,aes(y=1,x=num.tot.events))+coord_flip()+geom_text(aes(label=num.tot.events),fontface="plain",size=4)+ theme_bw()+theme(axis.title.y=element_blank(),panel.grid.minor=element_blank(),panel.grid.major=element_line(),axis.text.y = element_blank(),axis.ticks.y = element_blank(),axis.text.x = element_text(colour="transparent"),axis.ticks.x=element_line(colour="transparent"),panel.border=element_rect(colour="transparent"),plot.margin=unit(c(0.5,0.5,0.5,-0.75),units="cm"),plot.title=element_text(size=12),axis.title.x=element_text(colour="transparent"))+ ggtitle("Number of\ntested events")+scale_y_discrete(name="Number of alternative splicing events")
+
+g2p<-arrangeGrob(g.left,g.right,ncol=2,nrow=1,widths=c(9,3),heights=c(8))
+plot(g2p)
+```
+
+<h4 style="color:blue">Figure 3C: Differential splice event stratification in upf1 mutant and wildtype fish</h4>   
+<hr color="blue" >
+
+Produce a list of gene IDs with known NMD transcripts as well a list of gene IDs with upregulated nonNMD transcripts in upf1-/- vs upf1+/+ comparison:
+
+```{r F3C_prep_tab,echo=TRUE}
+NMDlist<-qdat.an$ensembl_gene_id[qdat.an$Biotype2 %in% "NMD"]
+nonNMD.up<-res.tab.filt.an$ensembl_gene_id[res.tab.filt.an$Biotype2 %in% "nonNMD"&res.tab.filt.an$ChangeDirection %in% "UP"]
+```
+
+Perform the calculations:
+
+```{r F3C_calc,echo=TRUE}
+F3Ctab<-as.data.frame(matrix(ncol=5,nrow=5))
+colnames(F3Ctab)<-asvo
+rownames(F3Ctab)<-c("All recorded events","Events in PTC+ genes","Events in PTC- genes","Events in PTC- upregulated genes","Events in PTC- not upregulated genes")
+
+for(k in seq_along(asvo)){
+    AS.tab.filt<-resL[[asvo[k]]]
+    F3Ctab["All recorded events",asvo[k]]<-nrow(AS.tab.filt)
+    AS.nonNMD<-AS.tab.filt[!AS.tab.filt$GeneID %in% NMDlist,]
+    F3Ctab["Events in PTC- genes",asvo[k]]<-nrow(AS.nonNMD)
+    F3Ctab["Events in PTC+ genes",asvo[k]]<-nrow(AS.tab.filt)-nrow(AS.nonNMD)
+    AS.nonNMD.notUP<-AS.nonNMD[!AS.nonNMD$GeneID %in% nonNMD.up,]
+    F3Ctab["Events in PTC- not upregulated genes",asvo[k]]<-nrow(AS.nonNMD.notUP)
+    F3Ctab["Events in PTC- upregulated genes",asvo[k]]<-nrow(AS.nonNMD)-nrow(AS.nonNMD.notUP)
+}
+F3Ctab$Total<-rowSums(F3Ctab)
+F3Ctab
+```
+
+We first stratify the alternative splicing events into two groups, depending if the affected gene has known NMD isoforms or not (events in PTC+, PTC- genes). We then stratify events in PTC- genes into two further groups, depending if the affected genes had upregulated nonNMD transcripts or not (events in PTC- upregulated and not upregulated genes). Note that by pre-substraction of all NMD transcript-encoding genes in the first step, we can substract genes with upregulated nonNMD transcripts in the second step, irrespectively of any of them encoding NMD transcripts as well. 
+
+The phrase "upregulated genes" effectively indicates genes coding for upregulated transcipts, as transcript-level quantitation was used.
+
+<h4 style="color:blue">Figure 3F: NMD ratios for selected genes in upf1 mutant and wildtype fish</h4>   
+<hr color="blue" >
+
+
+Prepare plotting data:
+
+```{r F3F_prep_plotdata}
+plotdata<-qdat.sumW[qdat.sumW$ensembl_gene_id %in% c(bmk$ensembl_gene_id[match(c("srsf7a","srsf5a","hnrnph3"),bmk$external_gene_name)]),]
+plotdata$GeneSymbol<-bmk$external_gene_name[match(plotdata$ensembl_gene_id,bmk$ensembl_gene_id)]
+plotdata
+```
+
+Plot a dotplot with jitter:
+
+```{r F3F_plot, fig.cap="Figure 3F",height=5,width=5}
+plotdata$Group<-factor(plotdata$Group,levels=c("WT","Mut"))
+ggplot(data=plotdata,aes(x=reorder(GeneSymbol,Ratio),y=Ratio,fill=Group))+geom_point(position=position_jitter(width=0.2,height=0.01,seed=123),size=3,pch = 21)+scale_fill_manual(values=c("#FFFFFF","#CCCCCC"))+theme(text = element_text(size=16),axis.text = element_text(size=14),axis.text.x=element_text(angle=90,vjust=0),axis.title = element_text(size=14)) +xlab("GeneSymbol")+ylim(0,1)
+```
+
+<h4 style="color:blue">Figure 4A-B: Transcript level quantitation in tnpo3 mutant and wildtype fish with biotype annotation</h4>   
+<hr color="blue" >
+
+Load salmon output data with transcript-level TPM counts for tnpo3 mutant and wildtype fish:
+
+```{r tnpo3_download1, echo=TRUE}
+con <- curl('https://owncloud.gwdg.de/index.php/s/EaqmwLATYmOiMhw/download',open='rb')
+load(con)
+close(con)
+
+dim(qdat)
+sum(complete.cases(qdat))
+## qdat is in a data.table format - make sure the data.table package is loaded!
+qdat
+```
+
+Load sleuth output data with results of differential transcript expression for tnpo3 mutant and wildtype fish:
+
+```{r tnpo3_download2, echo=TRUE}
+con <- curl('https://owncloud.gwdg.de/index.php/s/bnbFKnUJzSrN1SA/download',open='r')
+results_table<-read.table(con,sep="\t",header=TRUE,quote="",as.is=TRUE)
+close(con)
+
+dim(results_table)
+sum(complete.cases(results_table))
+results_table<-results_table[complete.cases(results_table),]
+dim(results_table)
+head(results_table)
+```
+
+Annotate the 'results_table' with mean TPM values per group using 'qdat' and calculate log2 fold changes:
+
+```{r annot_res_tnpo3, echo=TRUE}
+meandat<-summarize(group_by(qdat,Name,Group),MeanTPM=mean(TPM))
+meandatW<-dcast(Name~Group,value.var="MeanTPM",data=meandat)
+
+results_table$MeanTPM.WT<-meandatW$WT[match(results_table$target_id,meandatW$Name)]
+results_table$MeanTPM.Mut<-meandatW$Mut[match(results_table$target_id,meandatW$Name)]
+results_table$Log2FC<-with(results_table,log2(MeanTPM.Mut/MeanTPM.WT))
+sum(is.infinite(results_table$Log2FC))
+```
+
+We have calculated log2 fold changes on mean TPM values without adding a pseudocount, using only transcripts for which sleuth produced differential expression estimates. This conservative approach doesn't introduce additional noise when calculating log2 fold changes for lowly expressed genes. As a result, `r sum(is.infinite(results_table$Log2FC))` values are infinite, and we will ignore those for further analysis.
+
+Filter results table to retain transcripts with statistical support for differential expression passing the filtering criteria of absolute log2 fold change at least 1, and qvalue less than 0.05:
+
+```{r res_annot_tnpo3, echo=TRUE}
+results_table.filt<-results_table[results_table$qval<0.05&abs(results_table$Log2FC)>=1,]
+results_table.filt<-results_table.filt[complete.cases(results_table.filt),]
+dim(results_table.filt)
+```
+
+This manuscript focuses on the contrast in regulation of NMD and non-NMD transcripts, as defined in ensembl gene annotation http://vega.archive.ensembl.org/info/about/gene_and_transcript_types.html .   
+Results reported in the manuscript were annotated using ensembl release 88.
+Annotate filtered results with transcript biotype using the biomaRt package:
+
+```{r res_biomart_tnpo3, echo=TRUE}
+zv10.ens<-useMart(biomart="ensembl",dataset="drerio_gene_ensembl",host="http://mar2017.archive.ensembl.org")
+bmk<-getBM(attributes=c("ensembl_transcript_id","transcript_biotype","ensembl_gene_id","external_gene_name"),filter="ensembl_transcript_id",values=results_table.filt$target_id,mart=zv10.ens)
+res.tab.filt.an<-merge(x=results_table.filt,y=bmk,by.x="target_id",by.y="ensembl_transcript_id",all.x=TRUE)
+head(res.tab.filt.an)
+```
+
+Annotate 'qdat' TPM expression table with transcript biotype information from ensembl:
+
+```{r qdat_biomart_tnpo3, echo=TRUE}
+bmk2<-getBM(attributes=c("ensembl_transcript_id","transcript_biotype","ensembl_gene_id","external_gene_name"),filter="ensembl_transcript_id",values=qdat$Name,mart=zv10.ens)
+qdat.an<-unique(merge(x=qdat,y=bmk2,by.x="Name",by.y="ensembl_transcript_id",all.x=TRUE,allow.cartesian=TRUE))
+
+qdat.an$Biotype2<-"nonNMD"
+qdat.an$Biotype2[qdat.an$transcript_biotype %in% "nonsense_mediated_decay"]<-"NMD"
+head(qdat.an)
+```
+
+We collapse all transcript isoforms not annotated as "nonsense_mediated_decay" to one category "nonNMD".
+
+Calculate mean transript expression over replicates in each group and add binarized transcript biotype information:
+
+```{r TPMmean_tnpo3, echo=TRUE}
+TPMmean<-as.data.frame(summarize(group_by(qdat.an,Group,Name),MeanTPM=mean(TPM)),stringsAsFactors=FALSE)
+TPMmean$Biotype<-qdat.an$Biotype2[match(TPMmean$Name,qdat.an$Name)]
+head(TPMmean)
+```
+Reshape table to obtain separate columns for the WT and for the Mut group. Add information on passing statistical filters:
+
+```{r TPMmean2_tnpo3, echo=TRUE}
+TPMmean2<-dcast(Name+Biotype~Group,data=TPMmean,value.var="MeanTPM")
+TPMmean2$Filter<-"Fail"
+TPMmean2$Filter[TPMmean2$Name %in% results_table.filt$target_id]<-"Pass"
+head(TPMmean2)
+```
+```{r TPMplot_tnpo3, fig.cap="Figure 4A",fig.height=5,fig.width=6}
+TPMmean2$Biotype<-factor(TPMmean2$Biotype,levels=c("nonNMD","NMD"))
+TPMmean2$Filter<-factor(TPMmean2$Filter,levels=c("Fail","Pass"))
+ggplot(TPMmean2 %>% arrange(Filter))+geom_point(aes(x=WT,y=Mut,colour=Filter,shape=Biotype),size=3,alpha=0.6)+geom_abline(aes(intercept=0,slope=1))+theme(axis.text=element_text(size=14),axis.title=element_text(size=16),strip.text=element_text(size=12))+scale_colour_manual(values=c("grey40","orangered3"))+xlab("tnpo3+/+")+ylab("tnpo3-/-")+xlim(0,2000)+ylim(0,2000)
+```
+
+Aggregate TPM counts per gene as sum over transcript counts, separately for "NMD" and for "nonNMD" transcript classes:
+
+```{r qdat_sum_tnpo3, echo=TRUE}
+qdat.sum<-summarize(group_by(qdat.an,ensembl_gene_id,SampleID,Biotype2),sumTPM=sum(TPM))
+qdat.sumW<-dcast(ensembl_gene_id+SampleID~Biotype2,value.var="sumTPM",data=qdat.sum)
+qdat.sumW<-qdat.sumW[complete.cases(qdat.sumW),]
+dim(qdat.sumW)
+head(qdat.sumW)
+```
+
+Calculate mean fraction of "NMD" transcript expression against sum of "NMD" and "nonNMD" transcript expression per gene ("NMD ratio"):
+
+```{r NMDratio_tnpo3, echo=TRUE}
+qdat.sumW$Ratio<-with(qdat.sumW,NMD/(NMD+nonNMD))
+qdat.sumW$Group<-qdat$Group[match(qdat.sumW$SampleID,qdat$SampleID)]
+qdat.sum2<-summarize(group_by(qdat.sumW,ensembl_gene_id,Group),MeanRatio=mean(Ratio))
+qdat.sum2W<-dcast(ensembl_gene_id~Group,value.var="MeanRatio",data=qdat.sum2)
+dim(qdat.sum2W)
+head(qdat.sum2W)
+```
+
+Apply limma to logit-transformed NMD ratios to obtain a list of statistically different ratios between mutant and wildtype fish, and filter results for FDR<0.05:
+
+```{r limma_ratio_tnpo3, echo=TRUE}
+qdat.sumW$LogitRatio<-logit(qdat.sumW$Ratio,percents=FALSE,adjust=0.025)
+
+limdat<-dcast(ensembl_gene_id~SampleID,value.var="LogitRatio",data=qdat.sumW)
+rownames(limdat)<-limdat$ensembl_gene_id
+limdat<-limdat[,!colnames(limdat) %in% "ensembl_gene_id"]
+
+sampleInfo<-unique(qdat.sumW[,c("SampleID","Group")])
+rownames(sampleInfo)<-sampleInfo$SampleID
+sampleInfo<-sampleInfo[match(colnames(limdat),sampleInfo$SampleID),]
+
+#limma
+design<-as.data.frame(matrix(ncol=2,nrow=(ncol(limdat))),stringsAsFactors=FALSE)
+colnames(design)<-c("Intercept","Group")
+rownames(design)<-colnames(limdat)
+design$Group<-as.numeric(factor(sampleInfo$Group[match(colnames(limdat),sampleInfo$SampleID)],levels=c("WT","Mut")))
+
+design$Intercept<-1
+design<-as.matrix(design)
+
+fit<-lmFit(limdat,design)
+fit.eB<-eBayes(fit)
+tT.FDR5<-topTable(fit.eB,2,p.value=0.05,number=Inf)[,c("logFC","t","adj.P.Val","B")]
+dim(tT.FDR5)
+head(tT.FDR5)
+```
+
+Add information on passing or failing filters on statistical metrics:
+
+```{r signif_tnpo3, echo=TRUE}
+qdat.sum2W$Filter<-"FAIL"
+qdat.sum2W$Filter[qdat.sum2W$ensembl_gene_id %in% rownames(tT.FDR5)]<-"PASS"
+table(qdat.sum2W$Filter)
+
+```
+
+
+Plot NMD ratios per gene aggregated over wild type and mutant groups:
+
+```{r NMDratio_plot_tnpo3, echo=TRUE, fig.cap="Figure 4B left panel",fig.height=5,fig.width=5}
+ggplot(qdat.sum2W %>% arrange(Filter))+geom_point(aes(x=WT,y=Mut,colour=Filter),size=2,alpha=0.6)+geom_abline(aes(intercept=0,slope=1))+scale_colour_manual(values=c("grey40","orangered3"))+theme(axis.text=element_text(size=14),axis.title=element_text(size=16),strip.text=element_text(size=12))+ggtitle("NMD ratio")+xlab("tnpo3+/+")+ylab("tnpo3-/-")
+```
+
+```{r violin_tnpo3, echo=TRUE, fig.cap="Figure 4B right panel",fig.height=5,fig.width=5}
+qdat.sum2$Group[qdat.sum2$Group %in% "WT"]<-"tnpo3+/+"
+qdat.sum2$Group[qdat.sum2$Group %in% "Mut"]<-"tnpo3-/-"
+qdat.sum2$Group<-factor(qdat.sum2$Group,levels=c("tnpo3+/+","tnpo3-/-"))
+ggplot(data=qdat.sum2)+geom_violin(aes(x=Group,y=MeanRatio,fill=Group))+geom_boxplot(aes(x=Group,y=MeanRatio),width=0.1)+ggtitle("NMD ratio")+theme(axis.text=element_text(size=14),axis.title=element_text(size=16))
+```
+
+<h4 style="color:blue">Figure 4C: Differential splicing event detection in tnpo3 mutant and wildtype fish</h4>   
+<hr color="blue" >
+
+
+Download event tables, one for each alternative event class (SE, RI, MXE, A5SS, A3SS), and filter for FDR<0.01 and absolute inclusion level difference of 0.05:
+
+```{r tnpo3_download3, echo=TRUE}
+asv<-c("A3SS","A5SS","MXE","RI","SE")
+resL<-vector("list",length(asv))
+names(resL)<-asv
+conL<-list("https://owncloud.gwdg.de/index.php/s/iuKZhNHtnA6xRqi/download","https://owncloud.gwdg.de/index.php/s/ZZ1uwNHxQ7Aiydy/download","https://owncloud.gwdg.de/index.php/s/8qOyBxHs4Sldj3W/download","https://owncloud.gwdg.de/index.php/s/KDc9m65IRwEUlKd/download","https://owncloud.gwdg.de/index.php/s/BipXuUaEOfsq3tp/download")
+names(conL)<-asv
+
+for(i in seq_along(asv)){
+con <- curl(conL[[i]],open='r')
+tabi<-read.table(con,sep="\t",header=TRUE,quote="",as.is=TRUE)
+close(con)
+tabi$GeneID<-with(tabi,gsub("\"","",GeneID))
+tabi$geneSymbol<-with(tabi,gsub("\"","",geneSymbol))
+tabi_f<-tabi[tabi$FDR<0.01&abs(tabi$IncLevelDifference)>=0.05,]
+resL[[i]]<-tabi_f
+}
+unlist(lapply(resL,function(X)nrow(X)))
+unlist(lapply(resL,function(X)length(unique(X$GeneID))))
+tnpo3_resL<-resL
+```
+
+Download the summary table for rMATS events :
+
+```{r tnpo3_download4, echo=TRUE}
+con<-curl("https://owncloud.gwdg.de/index.php/s/fDsyi2bm2hyCwqm/download",open='r')
+sumtab<-read.table(con,sep="\t",header=TRUE,quote="",as.is=TRUE)
+close(con)
+sumtab
+```
+
+Update information using event counts from tables filtered according to chosen criteria and format for plotting:
+
+```{r sumtab_filt_tnpo3,echo=TRUE}
+asvo<-c("SE","RI","MXE","A5SS","A3SS")
+sumtab<-sumtab[match(c(asvo),sumtab$EventType),]
+sumtab$LYlab<-c("Skipped Exon","Retained Intron","Mutually Exclusive Exons","Alternative Donor Site","Alternative Acceptor Site")
+sumtab$RYlab<-sumtab$NumEvents.JC.only
+sumtab$WT<-NA
+sumtab$MT<-NA
+for(k in seq_along(asvo)){
+tab.filt<-resL[[asvo[k]]]
+#at first, keep the same direction as in the original rMATS ouput
+sumtab$WT[sumtab$EventType==asvo[k]]<-nrow(tab.filt[tab.filt$IncLevelDifference<0,])
+sumtab$MT[sumtab$EventType==asvo[k]]<-nrow(tab.filt[tab.filt$IncLevelDifference>0,])
+}
+#DO reverse the numbers for SE (to actually reflect number of skipping events, rather than retention)
+sumtab[sumtab$EventType=="SE",c("WT","MT")]<-rev(sumtab[sumtab$EventType=="SE",c("WT","MT")])
+sumtab
+
+sumtabL<-melt(sumtab[,6:9],variable.name="Group",value.name="num.sig.events",id.var=c("LYlab","RYlab"))
+colnames(sumtabL)[1:2]<-c("Category","num.tot.events")
+sumtabL$num.sig.events<-as.numeric(sumtabL$num.sig.events)
+sumtabL$num.tot.events<-as.character(sumtabL$num.tot.events)
+sumtabL$num.tot.events<-factor(sumtabL$num.tot.events,levels=rev(as.character(sumtabL$num.tot.events[1:5])))
+Glab<-c("WT"="tnpo3+/+","MT"="tnpo3-/-")
+sumtabL$Group.graph<-Glab[sumtabL$Group]
+sumtabL
+```
+
+rMATS reports a skipped exon as an event in the sample group, in which the inclusion ratio for that exon is higher, such that it is effectively an exon retention event. In order to be able to interpret the reported events as proper exon skipping, we have reverted the number of reported exon retention events between the experimental groups in the code chunk above. As a result, exons with lower inclusion levels in the mutant group are now reported as skipped exons in that group, and exons with lower inclusion levels in the wildtype groups are reported as skipped in that group.
+
+Generate the final plot by combining two plot grobs:
+
+```{r rMATS_plot_tnpo3, echo=TRUE, fig.cap="Figure 4C",fig.height=10,fig.width=10}
+g.left<-ggplot(data=sumtabL,aes(y=num.sig.events,x=Category,fill=factor(Group.graph)))+geom_bar(stat="identity",position="dodge")+theme_bw()+theme(axis.title.y=element_blank(),plot.margin=unit(c(0.5,0.4,0.5,0.5),units="cm"),plot.title=element_text(colour="transparent"))+coord_flip()+scale_fill_manual(values=c("dark red","black"))+scale_y_continuous(name="Number of alternative splicing events")+ guides(fill=guide_legend(title=NULL))+ theme(legend.justification=c(1,0), legend.position=c(1,0))+ggtitle("Number of\ntested events")
+
+g.right<-ggplot(data=sumtabL,aes(y=1,x=num.tot.events))+coord_flip()+geom_text(aes(label=num.tot.events),fontface="plain",size=4)+ theme_bw()+theme(axis.title.y=element_blank(),panel.grid.minor=element_blank(),panel.grid.major=element_line(),axis.text.y = element_blank(),axis.ticks.y = element_blank(),axis.text.x = element_text(colour="transparent"),axis.ticks.x=element_line(colour="transparent"),panel.border=element_rect(colour="transparent"),plot.margin=unit(c(0.5,0.5,0.5,-0.75),units="cm"),plot.title=element_text(size=12),axis.title.x=element_text(colour="transparent"))+ ggtitle("Number of\ntested events")+scale_y_discrete(name="Number of alternative splicing events")
+
+g2p<-arrangeGrob(g.left,g.right,ncol=2,nrow=1,widths=c(9,3),heights=c(8))
+plot(g2p)
+```
+
+<h4 style="color:blue">Figure 4D: Comparison of genes affected by differential splicing events between upf1 mutant and tnpo3 mutant fish</h4>   
+<hr color="blue" >
+
+Generate strings identifying unique events for different classes of events. For each class , intersect the unique identifiers:
+
+```{r F4D, fig.cap=asvo}
+sl<-vector("list",length(asvo))
+names(sl)<-asvo
+sl[["SE"]]<-c("chr","strand","exonStart_0base","exonEnd")
+sl[["RI"]]<-c("chr","strand","riExonStart_0base","riExonEnd")
+sl[["MXE"]]<-c("chr","strand","X1stExonStart_0base","X1stExonEnd","X2ndExonStart_0base","X2ndExonEnd")
+sl[["A3SS"]]<-c("chr","strand","longExonStart_0base","longExonEnd","shortES","shortEE")
+sl[["A5SS"]]<-c("chr","strand","longExonStart_0base","longExonEnd","shortES","shortEE")
+
+for(i in seq_along(sl)){
+  a<-asvo[i]
+  ud<-upf1_resL[[a]]
+  td<-tnpo3_resL[[a]]
+  s<-sl[[a]]
+  u<-apply(ud[,s],1,function(X)paste(X,collapse="_"))
+  t<-apply(td[,s],1,function(X)paste(X,collapse="_"))
+    
+  message(sprintf("There are %s common %s events between upf1 and tnpo3 sets. ",length(intersect(u,t)),a))
+  message(sprintf("There are %s unique %s events in the upf1 set.",length(setdiff(u,t)),a))
+  message(sprintf("There are %s unique %s events in the tnpo3 set.",length(setdiff(t,u)),a))
+}
+
+```
+
+<h4 style="color:blue">Figure 5C NMD ratio for rpl10a and rpl22l1 genes in upf1 wild type and mutant fish</h4>   
+<hr color="blue" >
+
+
+```{r F5C,fig.cap="Figure 5C",fig.height=5,fig.width=5}
+plotdata<-upf1_qdat.sumW[upf1_qdat.sumW$ensembl_gene_id %in% unique(bmk2$ensembl_gene_id[bmk2$external_gene_name %in% c("rpl10a","rpl22l1")]),]
+plotdata$GeneSymbol<-bmk2$external_gene_name[match(plotdata$ensembl_gene_id,bmk2$ensembl_gene_id)]
+ggplot(data=plotdata,aes(x=reorder(GeneSymbol,Ratio),y=Ratio,fill=Group))+geom_point(position=position_jitter(width=0.2,height=0.01,seed=123),size=3,pch = 21)+scale_fill_manual(values=c("#FFFFFF","#CCCCCC"))+theme(text = element_text(size=16),axis.text = element_text(size=14),axis.text.x=element_text(angle=90,vjust=0),axis.title = element_text(size=14)) +xlab("GeneSymbol")+ylim(0,1)
+
+```
+
+<h4 style="color:blue">Session Info</h4>   
+<hr color="blue" >
+
+The R locale setup used in preparing this vignette:
+
+```{r, echo=TRUE}
+sessionInfo()
+```
+
+Time needed to execute the R code in this document:
+
+```{r}
+end_time <- Sys.time()
+end_time - start_time
+```
